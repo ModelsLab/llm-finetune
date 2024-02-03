@@ -16,6 +16,7 @@ import PIL
 import toml
 import glob
 import gc
+from dpo_finetune import DPOFinetune
 
 # import multiprocessing
 # multiprocessing.set_start_method('spawn')
