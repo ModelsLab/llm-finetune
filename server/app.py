@@ -1135,6 +1135,24 @@ def start_train_lora(**params):
     delete_all_files("./training_images")
     return
 
+
+dpo_finetune_instance = DPOFinetune(model_name="", output_dir="", train_dataset=None)
+
+@app.route('/train_dpo', methods=['POST'])
+def train_dpo():
+    config = request.get_json()
+    
+    dpo_finetune_instance.model_name = config.get('model_name', "")
+    dpo_finetune_instance.output_dir = config.get('output_dir', "")
+    dpo_finetune_instance.train_dataset = config.get('train_dataset', None)
+    
+    # Start DPO fine-tuning in a separate thread
+    Thread(target=dpo_finetune_instance.train).start()
+    
+    print("DPO Fine-tuning started")
+    
+    return jsonify({'status': 'DPO Fine-tuning Started'})
+
 if __name__ == "__main__":
     # mp.set_start_method('spawn')
     delete_all_files("./output/trained-model")
