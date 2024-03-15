@@ -7,44 +7,27 @@ import torch
 from subprocess import call, getoutput, Popen
 from diffusers import StableDiffusionPipeline, DiffusionPipeline, DPMSolverMultistepScheduler
 from flask import Flask, jsonify, request, send_from_directory
-from celery import Celery, Task, current_task
 import time
 import logging
 from PIL import Image
 from io import BytesIO
 import PIL
 import toml
+import uuid
 import glob
 import gc
+from .utils import client,session
+from tasks import Celery , cel_app
+import celery
 
-# import multiprocessing
-# multiprocessing.set_start_method('spawn')
 
 import torch.multiprocessing as mp
 
-# mp.set_start_method('spawn')
 
-MODEL_NAME = "runwayml/stable-diffusion-v1-5"
-INSTANCE_DIR = "training_images"
-CLASS_DIR_men = "class_images_men"
-CLASS_DIR_women = "class_images_women"
-CLASS_DIR_couple = "class_images_couple"
-CLASS_DIR = "class_images"
-OUTPUT_DIR = "./output/trained-model"
+
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024 * 1024
 
-class Config:
-    CELERY_BROKER_URL = 'redis://localhost/1'
-    CELERY_RESULT_BACKEND = 'redis://localhost/2'
-
-app.config.from_object(Config)
-
-def make_celery(app):
-    celery = Celery('tasks', broker=app.config['CELERY_BROKER_URL'], backend=app.config['CELERY_RESULT_BACKEND'])
-    celery.conf.update(app.config)
-    return celery
-
-celery = make_celery(app)
 
 from redis import Redis
 
@@ -79,15 +62,6 @@ def queue_time_estimate():
 
 
 
-session = boto3.session.Session()
-client = session.client('s3',
-                        region_name='auto',                            endpoint_url='https://537bd2539513650478e73dedc625a962.r2.cloudflarestorage.com/sd-api',
-                        aws_access_key_id='6350170c01c6af2ca04caf7f6be3e323',                    aws_secret_access_key='1b590c713704c2c5cd24d6e12e851de684003345a8a69af1fc62fbc849095e55')
-
-# celery = Celery('tasks', broker='redis://localhost/1',backend='redis://localhost/2')
-
-# celery.conf.broker_pool_limit = 10000
-
 
 
 from flask import Flask, request, jsonify
@@ -103,7 +77,105 @@ current_task_id = None
 import requests
 import os
 
+
+
+@app.route("/create-project",methods = ["POST"])
+def create_project():
+    """
+        Creation of finetunning project with unique uuid.
+    """
+    if request.method == "POST":
+        name = request.form["name"]
+        webhook = request.form["webhook"]
+        project_id = uuid.uuid4()
+
+        response = requests.post(webhook,data={
+            "name" : name,
+            "webhook" : webhook
+        })
+
+        if response.status_code == 201 :
+            return jsonify({
+                "status" : "success",
+                "message" : "Project created succesfully."
+            })
+        else :
+            return jsonify({
+                "status" : "failure",
+                "message" : "somthing went wrong please try again."
+            })
+    
+
+@app.route("/data/upload-data",methods = ["POST"])
+def upload_data():
+    """
+    Upload of data in specied format.
+    """
+    raw_data = request.files["raw_data"]
+    project_id = request.form.get("project_id")
+    webhook = request.form.get("webhook")
+    
+    ### following are the paramters required for data loading
+     
+    data_format = request.form.get("format",default=None) # json , csv parquet etc
+    train_data_files = request.files["training_data"]
+    validation_data_files = request.files["validation_data"]
+    test_data_files = request.files["testing_data"]
+    num_proc = request.form.get("num_of_processes",default=8)
+
+
+    ## upload required file to s3 bucket over here ...
+
+    ## logic for for background task for loading data into memory.
+
+    params = {
+        "project_id" : project_id,
+        "raw_data" : raw_data.filename,
+        "data_format" : data_format,
+        "training_data" : train_data_files.filename,
+        "testing_data" : test_data_files.filename,
+        "validation_data" : validation_data_files.filename,
+        "num_of_proc" : num_proc
+    }
+
+    response = requests.post(webhook,data=params)
+    if response.status_code == 201 :
+        return jsonify({
+            "status" : "success",
+            "message" : "data upload succesfull."
+        })
+    else :
+        return jsonify({
+            "status" : "failure",
+            "message" : "data upload failed"
+        })
+
+@app.route("/data/load_from_hf",methods = ["POST"])
+def load_from_hf():
+    """
+    Load data from huggingface dataset hub.
+    """
+
+    if request.method == "POST":
+
+        dataset_id = request.form.get("dataset_id")
+        project_id = request.form.get("project_id")
+        webhook = request.form.get("webhook")
+        split = request.form.get("split",default=None)
+
+        ## TODO : add background task to load dataset from hf hub 🤗.
+
+
+
+@app.route("/dpo_trainer",methods = ["POST"])
+def dpo_finetune():
+    pass
+
+
+
 def download_file(url, destination_folder="./pretrained_models"):
+
+
     try:
         # Sending a GET request to the URL
         response = requests.get(url)
