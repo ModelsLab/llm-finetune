@@ -19,7 +19,8 @@ import gc
 from .utils import client,session
 from tasks import Celery , cel_app
 import celery
-
+from .src.data_loader.hf_datasets import DataLoader
+from .tasks import dpo_trainer
 
 import torch.multiprocessing as mp
 
@@ -163,13 +164,132 @@ def load_from_hf():
         webhook = request.form.get("webhook")
         split = request.form.get("split",default=None)
 
-        ## TODO : add background task to load dataset from hf hub 🤗.
+        dataloader = DataLoader(dataset_id=dataset_id,split=split)
+        info = dataloader.get_dataset_info()
+        if not info:
+            return jsonify({
+                "status":"failure",
+                "message" : "You have given wrong dataset id please check on huggingface dataset hub and try again."
+            })
 
+        response = requests.post(webhook,data={
+            "project_id": project_id,
+            "dataset_id" : dataset_id,
+            "split" : split
+        })
+        if response.status_code == 201 :
+            return jsonify({
+                "status" : "success",
+                "message" : "dataset creatin succesfull"
+            })
+        else :
+            return jsonify({
+                "status" : "failure",
+                "message" : "something went wrong please try again."
+            })
 
+def task_time_estimate(name: str, params: Dict[str, Any]) -> float:
+    ### TODO : Find the ways on the basis of tasktype and task
+    return 30.0
 
 @app.route("/dpo_trainer",methods = ["POST"])
 def dpo_finetune():
-    pass
+    model_id = request.form.get("model_id",default=None)
+
+    if not model_id:
+        return jsonify({
+            "status" : "failure",
+            "message":"you forgot to provide model id for training.take a look at supported models and specify id."
+        })  
+    training_dataset = request.form.get("train_data",default=None)
+    if not training_dataset:
+        return jsonify({
+            "status" : "failure",
+            "message" : "Provide the name of uploaded training dataset"
+        })
+    epochs = request.form.get("epochs",default=1)
+    per_device_train_batch_size = request.form.get("per_device_train_batch_size",default=12)
+    per_device_eval_batch_size = request.form.get("per_device_eval_batch_size",default=4)
+    gradient_accumulation_steps = request.form.get("gradient_accumulation_steps",default=1)
+    optim = request.form.get("optimizer",default=None)
+    if not optim :
+        return jsonify({
+            "status":"failure",
+            "message" : "You forgot to specify optimizer for training purpose."
+        })
+    
+    learning_rate = request.form.get("learning_rate",default=5e-5)
+    max_grad_norm = request.form.get("max_grad_norm",default=0.3)
+    warmup_ratio = request.form.get("warmup_ratio",default=0.1)
+    lr_scheduler_type= request.form.get("lr_scheduler_type",default="cosine")
+    logging_steps = request.form.get("logging_steps",default=25)
+    save_steps = request.form.get("save_steps",default=500)
+    evaluation_strategy = request.form.get("evaluation_strategy",default="steps")
+    eval_steps= request.form.get("eval_steps",default=700)
+    bf16 = request.form.get("bf16",default=True)
+    tf32 = request.form.get("tf32",default=True)
+
+    ### peft configs 
+    r = request.form.get("r",default=64)
+    lora_alpha = request.form.get("r",default=64)
+    lora_dropout = request.form.get("lora_dropout",default=0)
+    bias = request.form.get("bias",default="none")
+    use_gradient_checkpointing = request.form.get("use_gradient_checkpointing",default=True)
+    random_state = request.form.get("random_state",default=3407),
+    use_rslora = request.form.get("use_rslora",default=False,type=bool)
+    
+    ### dpo config
+    beta = request.form.get("beta",default=0.1)
+
+    output_dir = "/dpo-models"
+    params = {
+        "training_args" : {
+            "output_dir" : output_dir,
+            "num_train_epochs" : epochs,
+            "per_device_train_batch_size" : per_device_train_batch_size,
+            "per_device_eval_batch_size" : per_device_eval_batch_size,
+            "gradient_accumulation_steps" : gradient_accumulation_steps,
+            "gradient_checkpointing" : use_gradient_checkpointing,
+            "optim" : optim,
+            "learning_rate" : learning_rate,
+            "max_grad_norm" : max_grad_norm,
+            "warmup_ratio" : warmup_ratio,
+            "lr_scheduler_type" : lr_scheduler_type,
+            "logging_steps" : logging_steps,
+            "save_steps" : save_steps,
+            "save_total_limit" : 1,
+            "evaluation_strategy" : evaluation_strategy,
+            "eval_steps" : eval_steps,
+            "bf16" : bf16,
+            "tf32" : tf32,
+        },
+        "peft_configs" : {
+            "r" : r,
+            "lora_alpha" : lora_alpha,
+            "lora_dropout" : lora_dropout,
+            "bias" : bias,
+            "use_gradient_checkpointing" : use_gradient_checkpointing,
+            "random_state" : random_state,
+            "use_rslora" : use_rslora
+        },
+        "dpo_configs" : {
+            "beta" : beta
+        },
+        "model_configs" : {
+            "max_seq_length" : 4094,
+            "dtype" : None,
+            "load_in_4bit" : True
+        }
+    }
+
+    name = "dpo_trainer"
+
+    task_time = task_time_estimate(name, params)
+    time_in_queue = queue_time_estimate() + task_time
+    task = dpo_trainer.apply_async(priority=0, kwargs={"params": params})
+    imagine_db.set(task.id,task_time)
+
+    
 
 
 

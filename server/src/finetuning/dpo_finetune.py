@@ -2,7 +2,7 @@ from transformers import TrainingArguments,AutoModelForCausalLM, AutoTokenizer
 import torch
 from trl import DPOTrainer
 from unsloth import FastLanguageModel , PatchDPOTrainer
-from typing import Dict , List
+from typing import Dict , List ,Any
 
 class DPOFineTune:
     def __init__(self,model,tokenizer , output_dir , train_dataset) -> None:
@@ -11,7 +11,7 @@ class DPOFineTune:
         self.tokenizer = tokenizer
         self.train_dataset = train_dataset
 
-    def train(self,training_params:Dict[str,str],parms:Dict[str,str]):
+    def train(self,training_params:Dict[str,Any],peft_configs:Dict[str,Any],dpo_configs:Dict[str,Any]):
         training_args = TrainingArguments(
             output_dir=training_args["output_dir"],
             num_train_epochs= training_args["num_train_epochs"],

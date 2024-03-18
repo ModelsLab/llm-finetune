@@ -10,7 +10,9 @@ import torch
 from .utils import (
     flush_memory,get_model_filename_from_id,timed
 )
-from typing import Dict
+from typing import Dict,Any
+from .src.finetuning import DPOFineTune
+
 redis_host = os.environ.get('REDIS_HOST', 'localhost')
 redis_port = os.environ.get('REDIS_PORT', 6379)
 redis_password = os.environ.get('REDIS_PASSWORD', None)
@@ -117,4 +119,22 @@ class CurrentModel:
                     
         self.model.to("cuda").eval()
         return self.model , self.tokenizer
-    
+
+CURRENT_MODEL = CurrentModel(None)
+
+@cel_app.task(name="dpo_trainer",bind = True,base = Task)
+@timed(log = True)
+def dpo_trainer(self,params:Dict[str,Any]):
+    training_args:Dict = params.get("training_args")
+    model_configs:Dict = params.get("model_configs")
+    peft_configs : Dict = params.get("peft_configs")
+    dpo_configs : Dict = params.get("dpo_configs")
+    model,tokenizer = CURRENT_MODEL.get(params["model_id"],{
+        "max_seq_length" : model_configs.get("max_seq_length"),
+        "dtype" : model_configs.get("dtype"),
+        "load_in_4bit" : model_configs.get("load_in_4bit")
+    })
+
+    trainer = DPOFineTune(model=model,tokenizer=tokenizer,output_dir=params["output_dir"])
+    trainer.train(training_params=training_args,peft_configs=peft_configs,dpo_configs=dpo_configs)
+    return params["output_dir"]
