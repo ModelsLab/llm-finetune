@@ -11,7 +11,7 @@ class DPOFineTune:
         self.tokenizer = tokenizer
         self.train_dataset = train_dataset
 
-    def train(self,training_params:Dict[str,Any],peft_configs:Dict[str,Any],dpo_configs:Dict[str,Any]):
+    def train(self,training_params:Dict[str,Any],peft_configs:Dict[str,Any],dpo_configs:Dict[str,Any],project_id):
         training_args = TrainingArguments(
             output_dir=training_args["output_dir"],
             num_train_epochs= training_args["num_train_epochs"],
@@ -31,22 +31,26 @@ class DPOFineTune:
             eval_steps = training_args["eval_steps"],
             bf16 = training_args["bf16"],
             tf32 = training_args["tf32"],
-            push_to_hub=False,
-            report_to="tensorboard"
+            report_to="wandb"
+        )
+        training_args = training_args.set_push_to_hub(
+            model_id=str(project_id),
+            private_repo=True,
+            always_push=True
         )
         
         ## unsolth logic
         model = FastLanguageModel.get_peft_model(
             self.model,
-            r = 64, # Choose any number > 0 ! Suggested 8, 16, 32, 64, 128
+            r = peft_configs["r"], # Choose any number > 0 ! Suggested 8, 16, 32, 64, 128
             target_modules = ["q_proj", "k_proj", "v_proj", "o_proj",
                             "gate_proj", "up_proj", "down_proj",],
-            lora_alpha = 64,
-            lora_dropout = 0, # Currently only supports dropout = 0
-            bias = "none",    # Currently only supports bias = "none"
-            use_gradient_checkpointing = True,
-            random_state = 3407,
-            use_rslora = False,  # We support rank stabilized LoRA
+            lora_alpha = peft_configs["lora_alpha"],
+            lora_dropout = peft_configs["lora_dropout"], # Currently only supports dropout = 0
+            bias = peft_configs["bias"],    # Currently only supports bias = "none"
+            use_gradient_checkpointing = peft_configs["use_gradient_checkpointing"],
+            random_state = peft_configs["random_state"],
+            use_rslora = peft_configs["use_rslora"],  # We support rank stabilized LoRA
             loftq_config = None, # And LoftQ
         )
 
@@ -56,9 +60,11 @@ class DPOFineTune:
             self.model,
             ref_model= None,
             args = training_args,
-            beta = 0.1,
+            beta = dpo_configs["beta"],
             train_dataset=self.train_dataset,
             tokenizer=self.tokenizer
         )
 
         dpo_trainer.train()
+
+

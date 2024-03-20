@@ -3,6 +3,8 @@ import os
 import logging
 from unsloth import FastLanguageModel
 import traceback
+import datasets
+import requests
 from .config import (
     MODELS_PATH
 )
@@ -134,7 +136,14 @@ def dpo_trainer(self,params:Dict[str,Any]):
         "dtype" : model_configs.get("dtype"),
         "load_in_4bit" : model_configs.get("load_in_4bit")
     })
+    ### logic for dataset loading 
+    dataset = datasets.load_dataset(params["dataset_id"],**params["dataset_configs"])
+    trainer = DPOFineTune(model=model,tokenizer=tokenizer,output_dir=params["output_dir"],train_dataset=dataset)
+    trainer.train(training_params=training_args,peft_configs=peft_configs,dpo_configs=dpo_configs,project_id=params["project_id"])
 
-    trainer = DPOFineTune(model=model,tokenizer=tokenizer,output_dir=params["output_dir"])
-    trainer.train(training_params=training_args,peft_configs=peft_configs,dpo_configs=dpo_configs)
+    if params["webhook"] :
+        response = requests.post(params["webhook"],data = {
+            "status" : "success",
+            "message" : f"model is finetuned and stored under project id {params["project_id"]}"
+        })
     return params["output_dir"]

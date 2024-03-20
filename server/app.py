@@ -89,10 +89,13 @@ def create_project():
         name = request.form["name"]
         webhook = request.form["webhook"]
         project_id = uuid.uuid4()
-
+        os.environ["WANDB_PROJECT"] = str(project_id)  # name your W&B project
+        os.environ["WANDB_LOG_MODEL"] = "checkpoint"
+        
         response = requests.post(webhook,data={
             "name" : name,
-            "webhook" : webhook
+            "webhook" : webhook,
+            "project_id" : project_id
         })
 
         if response.status_code == 201 :
@@ -195,6 +198,12 @@ def task_time_estimate(name: str, params: Dict[str, Any]) -> float:
 @app.route("/dpo_trainer",methods = ["POST"])
 def dpo_finetune():
     model_id = request.form.get("model_id",default=None)
+    project_id = request.form.get("project_id",default= None)
+    if project_id == None :
+        return jsonify({
+            "status" : "failure",
+            "message":"you forgot to provide project id for training."
+        })  
 
     if not model_id:
         return jsonify({
@@ -241,8 +250,23 @@ def dpo_finetune():
     ### dpo config
     beta = request.form.get("beta",default=0.1)
 
+    ### check for dataset config
+    dataset_id = request.form.get("dataset_id")
+
+    dataset_configs = request.form.get("dataset_configs",default={})
+
+
+    ## model configs 
+    max_seq_length = request.form.get("max_seq_length",4096)
+    dtype = request.form.get("dtype")
+    load_in_4bit = request.form.get("load_in_4bit")
+    webhook = request.form.get("webhook",default=None)
     output_dir = "/dpo-models"
     params = {
+        "project_id" : project_id,
+        "webhook" : webhook,
+        "dataset_id" : dataset_id,
+        "dataset_configs" : dataset_configs,
         "training_args" : {
             "output_dir" : output_dir,
             "num_train_epochs" : epochs,
@@ -276,9 +300,9 @@ def dpo_finetune():
             "beta" : beta
         },
         "model_configs" : {
-            "max_seq_length" : 4094,
-            "dtype" : None,
-            "load_in_4bit" : True
+            "max_seq_length" : max_seq_length,
+            "dtype" : dtype,
+            "load_in_4bit" : load_in_4bit
         }
     }
 
@@ -289,6 +313,14 @@ def dpo_finetune():
     task = dpo_trainer.apply_async(priority=0, kwargs={"params": params})
     imagine_db.set(task.id,task_time)
 
+
+    return {
+            "status": "queued",
+            "eta": time_in_queue,
+            "response": "",
+            "tip": "Your finetuning request has been queued. Please check the training logs on wandb",
+            "meta": params,
+        }
     
 
 
